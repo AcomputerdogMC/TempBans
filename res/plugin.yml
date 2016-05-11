@@ -1,0 +1,51 @@
+name: Tempbans
+version: 0.1.4
+description: Handles tempbans
+author: acomputerdog
+main: net.acomputerdog.tempbans.PluginTempBans
+
+commands:
+  ban:
+    description: Bans a player
+    permission: tempbans.ban
+    usage: Incorrect usage!  Use /ban <name | uuid> [duration] [reason]
+    aliases: [tbtempban,tempban,tbban]
+  pardon:
+    description: Pardons a player
+    permission: tempbans.pardon
+    usage: Incorrect usage!  Use /pardon <name | uuid>
+    aliases: tbpardon
+  bantime:
+    description: Looks up time remaining on a ban
+    permission: tempbans.bantime
+    usage: Incorrect usage!  Use /bantime <name | uuid>
+    aliases: [tbbantime,baninfo,tbbaninfo]
+  tbreload:
+    description: Reloads tempbans
+    permission: tempbans.reload
+    usage: Incorrect usage!  Use /tbreload
+  kick:
+    description: Kicks a player
+    permission: tempbans.kick
+    usage: Incorrect usage!  Use /kick <name | uuid> [reason]
+    aliases: tbkick
+
+permissions:
+  tempban.ban:
+    description: Temp-ban players
+    default: op
+  tempban.permaban:
+    description: Perma-ban players
+    default: op
+  tempban.pardon:
+    description: Pardons a player
+    default: op
+  tempban.bantime:
+    description: Looks up ban time for a player
+    default: op
+  tempban.reload:
+    description: Reloads tempbans
+    default: op
+  tempban.kick:
+    description: Reloads tempbans
+    default: op
