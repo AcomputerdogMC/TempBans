@@ -5,7 +5,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
+import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -24,23 +24,18 @@ public class PluginTempBans extends JavaPlugin implements Listener {
     private Map<String, String> reasonMap;
     private Date sharedDate;
 
-    //don't reset during onEnable or onDisable
-    private boolean reloading = false;
-
     @Override
     public void onEnable() {
         try {
-            if (!getDataFolder().isDirectory()) {
-                getDataFolder().mkdir();
+            if (!getDataFolder().isDirectory() && getDataFolder().mkdir()) {
+                getLogger().warning("Unable to create data directory!");
             }
             bansFile = new File(getDataFolder(), "bans.lst");
             banMap = new HashMap<>();
             reasonMap = new HashMap<>();
             sharedDate = new Date();
             loadBans();
-            if (!reloading) {
-                getServer().getPluginManager().registerEvents(this, this);
-            }
+            getServer().getPluginManager().registerEvents(this, this);
         } catch (Exception e) {
             e.printStackTrace();
             getServer().getPluginManager().disablePlugin(this);
@@ -53,6 +48,8 @@ public class PluginTempBans extends JavaPlugin implements Listener {
         banMap = null;
         reasonMap = null;
         sharedDate = null;
+
+        HandlerList.unregisterAll((JavaPlugin) this);
     }
 
     @EventHandler
@@ -170,10 +167,8 @@ public class PluginTempBans extends JavaPlugin implements Listener {
     }
 
     private void onReload(CommandSender sender) {
-        reloading = true;
         onDisable();
         onEnable();
-        reloading = false;
         sender.sendMessage(ChatColor.YELLOW + "TempBans reloaded.");
         getLogger().info("Reloaded.");
     }
