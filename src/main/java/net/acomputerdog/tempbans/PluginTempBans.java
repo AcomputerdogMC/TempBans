@@ -1,6 +1,5 @@
 package net.acomputerdog.tempbans;
 
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -10,34 +9,55 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerLoginEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.stream.Stream;
 
+/**
+ * Plugin main class
+ */
 public class PluginTempBans extends JavaPlugin implements Listener {
-    private static final long EXPIRATION_NEVER = 0L;
 
+    /**
+     * File that stores record of bans
+     */
     private File bansFile;
-    private Map<String, Long> banMap;
-    private Map<String, String> reasonMap;
-    private Date sharedDate;
+
+    /**
+     * Map of UUIDs to ban durations
+     * TODO database
+     */
+    private Map<UUID, BanEntry> banMap;
+
+    /**
+     * Command handler class
+     */
+    private TempBansCommandHandler commandHandler;
 
     @Override
     public void onEnable() {
         try {
+            // create data directory
             if (!getDataFolder().isDirectory() && getDataFolder().mkdir()) {
-                getLogger().warning("Unable to create data directory!");
+                getLogger().warning(Messages.CREATE_FOLDER_FAILED_LOG);
             }
             bansFile = new File(getDataFolder(), "bans.lst");
             banMap = new HashMap<>();
-            reasonMap = new HashMap<>();
-            sharedDate = new Date();
+            commandHandler = new TempBansCommandHandler(this);
+
             loadBans();
             getServer().getPluginManager().registerEvents(this, this);
+        } catch (IOException e) {
+            getLogger().log(Level.SEVERE, Messages.LOAD_FAILED_LOG, e);
+            getServer().getPluginManager().disablePlugin(this);
         } catch (Exception e) {
-            e.printStackTrace();
+            getLogger().log(Level.SEVERE, Messages.STARTUP_EXCEPTION_LOG, e);
             getServer().getPluginManager().disablePlugin(this);
         }
     }
@@ -46,22 +66,22 @@ public class PluginTempBans extends JavaPlugin implements Listener {
     public void onDisable() {
         bansFile = null;
         banMap = null;
-        reasonMap = null;
-        sharedDate = null;
+        commandHandler = null;
 
         HandlerList.unregisterAll((JavaPlugin) this);
     }
 
     @EventHandler
     public void onPlayerLogin(PlayerLoginEvent e) {
-        String id = e.getPlayer().getUniqueId().toString().toLowerCase();
-        if (banMap.containsKey(id)) {
-            if (isBanned(id)) {
-                e.disallow(PlayerLoginEvent.Result.KICK_BANNED, getBanMessage(id));
+        UUID uuid = e.getPlayer().getUniqueId();
+        BanEntry ban = banMap.get(uuid);
+        if (ban != null) {
+            if (ban.isActive()) {
+                e.disallow(PlayerLoginEvent.Result.KICK_BANNED, Messages.getBannedMessage(ban));
             } else {
-                banMap.remove(id);
-                reasonMap.remove(id);
-                getLogger().info("Player [" + id + "]'s ban expired.");
+                banMap.remove(ban.getPlayerUUID());
+                getLogger().info(() -> Messages.getBanExpiredLog(uuid));
+                e.getPlayer().sendMessage(Messages.BAN_EXPIRED_MESSAGE);
                 saveBans();
             }
         }
@@ -69,274 +89,88 @@ public class PluginTempBans extends JavaPlugin implements Listener {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        switch (command.getName()) {
-            case "ban" :
-                onBan(sender, args);
-                break;
-            case "pardon":
-                onPardon(sender, args);
-                break;
-            case "bantime":
-                onBantime(sender, args);
-                break;
-            case "tbreload":
-                onReload(sender);
-                break;
-            case "kick":
-                onKick(sender, args);
-                break;
-            default:
-                sender.sendMessage(ChatColor.RED + "Unknown command!");
-                getLogger().warning("Unknown command: " + command.getName());
-                break;
-        }
+        commandHandler.onCommand(sender, command, args);
         return true;
     }
 
-    private void onBan(CommandSender sender, String[] args) {
-        if (sender.hasPermission("tempbans.ban")) {
-            if (args.length >= 1) {
-                String p = getPlayer(args[0]);
-                if (p != null) {
-                    try {
-                        String reason = "unspecified";
-                        long expires = EXPIRATION_NEVER;
-                        if (args.length >= 2) {
-                            long delay = Long.parseLong(args[1]) * 60 * 1000; //delay in minutes
-                            expires = System.currentTimeMillis() + delay;
-                        }
-                        if (args.length >= 3) {
-                            StringBuilder builder = new StringBuilder();
-                            for (int idx = 2; idx < args.length; idx++) {
-                                if (idx != 2) {
-                                    builder.append(' ');
-                                }
-                                builder.append(args[idx]);
-                            }
-                            reason = builder.toString();
-                        }
-                        banPlayer(sender, p, expires, reason);
-                        sender.sendMessage(ChatColor.YELLOW + "Player has been banned.");
-                    } catch (NumberFormatException e) {
-                        sender.sendMessage(ChatColor.RED + "Invalid expiration date!");
-                    }
-                } else {
-                    sender.sendMessage(ChatColor.RED + "That player could not be found!  If they are offline, make sure you specify UUID instead of name.");
-                }
-            } else {
-                sender.sendMessage(ChatColor.RED + "Incorrect usage, use /ban <name | uuid> [duration] [reason]");
-            }
+    /**
+     * Gets the UUID of a player name or UUID.
+     * <p>
+     * If a name is given, then the server will be queried to look up
+     * the UUID for that player.
+     * <p>
+     * If a UUID is given, then it is converted into an object.
+     * <p>
+     * If a player could not be found or the UUID is invalid, then null is
+     * returned
+     *
+     * @param id The player name or UUID string
+     * @return return a UUID object
+     */
+    public UUID getUUIDForPlayer(String id) {
+        Player p = getServer().getPlayer(id);
+        if (p != null) {
+            return p.getUniqueId();
         } else {
-            sender.sendMessage(ChatColor.RED + "You do not have permission!");
-        }
-    }
-
-    private void onPardon(CommandSender sender, String[] args) {
-        if (sender.hasPermission("tempbans.pardon")) {
-            if (args.length >= 1) {
-                String p = getPlayer(args[0]);
-                if (p != null) {
-                    pardonPlayer(sender, p);
-                    sender.sendMessage(ChatColor.YELLOW + "Player pardoned.");
-                } else {
-                    sender.sendMessage(ChatColor.RED + "That player could not be found!  If they are offline, make sure you specify UUID instead of name.");
-                }
-            } else {
-                sender.sendMessage(ChatColor.RED + "Incorrect usage, use /ban <name | uuid> [duration] [reason]");
-            }
-        } else {
-            sender.sendMessage(ChatColor.RED + "You do not have permission!");
-        }
-    }
-
-    private void onBantime(CommandSender sender, String[] args) {
-        if (sender.hasPermission("tempbans.bantime")) {
-            if (args.length >= 1) {
-                String p = getPlayer(args[0]);
-                if (p != null) {
-                    sender.sendMessage(ChatColor.YELLOW + getBanInfo(p));
-                } else {
-                    sender.sendMessage(ChatColor.RED + "That player could not be found!  If they are offline, make sure you specify UUID instead of name.");
-                }
-            } else {
-                sender.sendMessage(ChatColor.RED + "Incorrect usage, use /ban <name | uuid> [duration] [reason]");
-            }
-        } else {
-            sender.sendMessage(ChatColor.RED + "You do not have permission!");
-        }
-    }
-
-    private void onReload(CommandSender sender) {
-        onDisable();
-        onEnable();
-        sender.sendMessage(ChatColor.YELLOW + "TempBans reloaded.");
-        getLogger().info("Reloaded.");
-    }
-
-    private void onKick(CommandSender sender, String[] args) {
-        if (sender.hasPermission("tempbans.kick")) {
-            if (args.length >= 1) {
-                String p = getPlayer(args[0]);
-                if (p != null) {
-                    String reason = "unspecified";
-                    if (args.length >= 2) {
-                        StringBuilder builder = new StringBuilder();
-                        for (int idx = 1; idx < args.length; idx++) {
-                            if (idx != 1) {
-                                builder.append(' ');
-                            }
-                            builder.append(args[idx]);
-                        }
-                        reason = builder.toString();
-                    }
-                    kickPlayer(sender, p, "Kicked for: \"" + reason + "\"");
-                    sender.sendMessage(ChatColor.YELLOW + "Player has been kicked.");
-                } else {
-                    sender.sendMessage(ChatColor.RED + "That player could not be found!  If they are offline, make sure you specify UUID instead of name.");
-                }
-            } else {
-                sender.sendMessage(ChatColor.RED + "Incorrect usage, use /kick <name | uuid> [reason]");
-            }
-        } else {
-            sender.sendMessage(ChatColor.RED + "You do not have permission!");
-        }
-    }
-
-    private String getPlayer(String id) {
-        try {
             try {
-                UUID.fromString(id); //make sure UUID is valid
-                return id.toLowerCase();
+                return UUID.fromString(id);
             } catch (IllegalArgumentException e) {
                 return null;
             }
-        } catch (Exception e) {
-            Player p = getServer().getPlayer(id);
-            if (p != null) {
-                return p.getUniqueId().toString().toLowerCase();
-            } else {
-                return null;
-            }
         }
     }
 
-    private void kickPlayer(CommandSender sender, String id, String reason) {
-        Player p = getServer().getPlayer(UUID.fromString(id));
+    public void kickPlayer(UUID id, String reason, String source) {
+        Player p = getServer().getPlayer(id);
         if (p != null) {
             p.kickPlayer(reason);
         }
-        getLogger().info("Player [" + id + "] is kicked by [" + sender.getName() + "] for [" + reason + "].");
+        getLogger().info(() -> Messages.getKickLog(id, reason, source));
     }
 
-    private void banPlayer(CommandSender sender, String id, long endTime, String reason) {
-        banMap.put(id, endTime);
-        reasonMap.put(id, reason);
-        kickPlayer(sender, id, reason);
+    public void banPlayer(UUID id, Date endTime, String reason, String source) {
+        BanEntry ban = new BanEntry(id, endTime, reason);
+        banMap.put(id, ban);
+
+        kickPlayer(id, reason, source);
         saveBans();
-        getLogger().info("Player [" + id + "] is banned by [" + sender.getName() + "] until [" + formatTime(endTime) + "] for [" + reason +"].");
+        getLogger().info(() -> Messages.getBanLog(ban, source));
     }
 
-    private void pardonPlayer(CommandSender sender, String id) {
+    public void pardonPlayer(UUID id, String source) {
         banMap.remove(id);
-        reasonMap.remove(id);
         saveBans();
-        getLogger().info("Player [" + id + "] is pardoned by [" + sender.getName() +"].");
+        getLogger().info(() -> Messages.getPardonLog(id, source));
     }
 
-    private String getBanInfo(String id) {
-        StringBuilder builder = new StringBuilder();
-        Long end = banMap.get(id);
-        if (end != null) {
-            builder.append("Ban information for ").append(id).append(":\n");
-            builder.append("Ban end: ").append(end == EXPIRATION_NEVER ? "never" : formatTime(end)).append('\n');
-            builder.append("Ban reason: ").append(reasonMap.get(id));
-        } else {
-            builder.append("That player is not currently banned.");
-        }
-        return builder.toString();
-    }
-
-    private void loadBans() {
+    private void loadBans() throws IOException {
         if (bansFile.isFile()) {
-            BufferedReader reader = null;
-            try {
-                reader = new BufferedReader(new FileReader(bansFile));
-                while (reader.ready()) {
-                    try {
-                        String line = reader.readLine();
-                        String[] parts = line.split("§");
-                        if (parts.length >= 3) {
-                            if (parts.length > 3) {
-                                getLogger().warning("Malformed line: \"" + line + "\"");
-                            }
-                            String id = parts[0];
-                            Long end = Long.parseLong(parts[1]);
-                            String message = parts[2];
-                            banMap.put(id, end);
-                            reasonMap.put(id, message);
-                        }
-                    } catch (Exception e) {
-                        getLogger().warning("Exception loading ban list entry: ");
-                    }
-                }
-            } catch (IOException e) {
-                getLogger().severe("Exception loading ban list!  Banned players may be able to access the server!");
-                throw new RuntimeException("Exception loading ban list!", e);
-            } finally {
-                if (reader != null) {
-                    try {
-                        reader.close();
-                    } catch (IOException ignored){}
-                }
+            try (Stream<String> lines = Files.lines(bansFile.toPath())) {
+                lines.forEach(this::loadBanEntry);
             }
+        } else {
+            getLogger().warning(Messages.BAN_FILE_MISSING_LOG);
+        }
+    }
+
+    private void loadBanEntry(String line) {
+        try {
+            BanEntry ban = BanEntry.parse(line);
+            banMap.put(ban.getPlayerUUID(), ban);
+        } catch (IllegalArgumentException e) {
+            getLogger().log(Level.SEVERE, Messages.getLoadBanFailedLog(line), e);
         }
     }
 
     private void saveBans() {
-        Writer writer = null;
-        try {
-            writer = new FileWriter(bansFile);
-            for (String id : banMap.keySet()) {
-                writer.write(id);
-                writer.write("§");
-                writer.write(String.valueOf(banMap.get(id)));
-                writer.write("§");
-                writer.write(reasonMap.get(id));
-                writer.write("\n");
-            }
+        try (Stream<String> stream = banMap.values().stream().map(Object::toString)) {
+            Files.write(bansFile.toPath(), (Iterable<String>) stream::iterator);
         } catch (IOException e) {
-            getLogger().severe("Exception saving bans!");
-            e.printStackTrace();
-        } finally {
-            if (writer != null) {
-                try {
-                    writer.close();
-                } catch (IOException ignored){}
-            }
+            getLogger().log(Level.SEVERE, Messages.SAVE_FAILED_LOG, e);
         }
     }
 
-    private String getBanMessage(String id) {
-        Long end = banMap.get(id);
-        if (end != null) {
-            return "You are banned until [" + (end == 0 ? "forever" : formatTime(end)) + "] for [" + reasonMap.get(id) + "].";
-        } else {
-            return "You are not banned.";
-        }
-    }
-
-    private String formatTime(long time) {
-        sharedDate.setTime(time);
-        return sharedDate.toString();
-    }
-
-    private boolean isBanned(String id) {
-        Long end = banMap.get(id);
-        if (end != null) {
-            if (end == EXPIRATION_NEVER || end > System.currentTimeMillis()) {
-                return true;
-            }
-        }
-        return false;
+    public BanEntry getBanEntry(UUID uuid) {
+        return banMap.get(uuid);
     }
 }
