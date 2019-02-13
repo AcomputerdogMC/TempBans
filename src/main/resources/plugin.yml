@@ -3,6 +3,7 @@ version: ${version}
 description: Handles tempbans
 author: acomputerdog
 main: net.acomputerdog.tempbans.PluginTempBans
+api-version: 1.13
 
 commands:
   ban:
