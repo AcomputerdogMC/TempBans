@@ -64,6 +64,8 @@ public class PluginTempBans extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        saveBans();
+
         bansFile = null;
         banMap = null;
         commandHandler = null;
