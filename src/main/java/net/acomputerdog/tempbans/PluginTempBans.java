@@ -44,7 +44,7 @@ public class PluginTempBans extends JavaPlugin implements Listener {
     public void onEnable() {
         try {
             // create data directory
-            if (!getDataFolder().isDirectory() && getDataFolder().mkdir()) {
+            if (!getDataFolder().isDirectory() && !getDataFolder().mkdirs()) {
                 getLogger().warning(Messages.CREATE_FOLDER_FAILED_LOG);
             }
             bansFile = new File(getDataFolder(), "bans.lst");

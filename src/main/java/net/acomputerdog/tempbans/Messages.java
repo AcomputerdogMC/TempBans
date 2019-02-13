@@ -29,7 +29,7 @@ public final class Messages {
     public static final String KICK_USAGE_MESSAGE = ChatColor.RED + "Incorrect usage, use /kick <name | uuid> [reason]";
     public static final String LOAD_FAILED_LOG = "IO error loading ban list!  Banned players will be able to access the server!";
     public static final String STARTUP_EXCEPTION_LOG = "Unhandled while starting up";
-    public static final String CREATE_FOLDER_FAILED_LOG = "Unable to create data directory!";
+    public static final String CREATE_FOLDER_FAILED_LOG = "Unable to create data directory.";
     public static final String BAN_EXPIRED_MESSAGE = ChatColor.YELLOW + "Your ban has expired.";
     public static final String BAN_FILE_MISSING_LOG = "Bans file does not exist";
     public static final String SAVE_FAILED_LOG = "Exception saving ban file, bans may be lost!";
